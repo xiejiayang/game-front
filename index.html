@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>都江堰治水</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #d9d2c2;
+        overflow: hidden;
+        font-family: "KaiTi", "STKaiti", serif;
+      }
+      #app {
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #rotate-tip {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: #2b2a26;
+        color: #e8e4d8;
+        font-size: 20px;
+        letter-spacing: 4px;
+        z-index: 10;
+      }
+      #rotate-tip[data-show="1"] {
+        display: flex;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="rotate-tip">请将设备横置 · 横屏游玩</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
