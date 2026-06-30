@@ -6,7 +6,7 @@ import { Hud } from './render/hud';
 import { FixedLoop } from './core/fixedLoop';
 import { GameSession } from './core/gameStateMachine';
 import { getBlockConfig } from './blocks/blockConfig';
-import { rotAngle, type BlockInstance } from './blocks/blockInstance';
+import { worldAngle, type BlockInstance } from './blocks/blockInstance';
 import { validatePlacement, snapToGrid } from './blocks/placement';
 import { createAudio } from './audio/audio';
 import { loadGameTextures } from './render/assets';
@@ -40,6 +40,7 @@ async function bootstrap(): Promise<void> {
   const session = new GameSession(L1);
   const water = new WaterRenderer(stage, L1, tex);
   const view = water.view;
+  stage.groundLayer.setFromMatrix(view.matrix); // 地面层套等距矩阵 → 左高右低斜视角
   const blocks = new BlockRenderer(stage, view, tex);
   const hud = new Hud(stage, L1, tex);
 
@@ -66,13 +67,13 @@ async function bootstrap(): Promise<void> {
   ghost.visible = false;
   stage.blockLayer.addChild(ghost);
 
-  // ---- 坐标换算 ----
-  const screenToWorld = (gx: number, gy: number): Vec2 => ({
-    x: view.wx(gx / stage.root.scale.x),
-    y: view.wy(gy / stage.root.scale.y),
-  });
+  // ---- 坐标换算（等距投影）----
+  // e.global 是 canvas 逻辑像素；除 root.scale 得 root 局部，再 unproject（地面层矩阵逆）得 world。
+  const screenToWorld = (gx: number, gy: number): Vec2 =>
+    view.unproject(gx / stage.root.scale.x, gy / stage.root.scale.y);
   const worldToPage = (wx: number, wy: number) => {
-    const g = stage.root.toGlobal(new Point(view.sx(wx), view.sy(wy)));
+    const p = view.project(wx, wy); // root 局部
+    const g = stage.root.toGlobal(new Point(p.x, p.y));
     const r = stage.app.canvas.getBoundingClientRect();
     return { x: r.left + g.x, y: r.top + g.y };
   };
@@ -87,7 +88,7 @@ async function bootstrap(): Promise<void> {
     for (let i = session.placedBlocks.length - 1; i >= 0; i--) {
       const b = session.placedBlocks[i];
       const cfg = getBlockConfig(b.blockId);
-      const a = rotAngle(b.rotStep);
+      const a = worldAngle(b.rotStep);
       const dx = w.x - b.pos.x;
       const dy = w.y - b.pos.y;
       const lx = dx * Math.cos(a) + dy * Math.sin(a);
@@ -122,7 +123,7 @@ async function bootstrap(): Promise<void> {
     ghost.clear();
     ghost.roundRect(-hl, -hs, hl * 2, hs * 2, 3).fill({ color: valid ? 0x4a8f6a : 0xb1503f, alpha: 0.6 });
     ghost.position.set(view.sx(w.x), view.sy(w.y));
-    ghost.rotation = rotAngle(ghostRot);
+    ghost.rotation = worldAngle(ghostRot);
     ghost.visible = true;
   };
 

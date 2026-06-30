@@ -7,3 +7,9 @@ test-results
 e2e/__screenshots__
 .env
 .env.local
+
+# 参考/调试用图与备份（非构建所需，勿入库）
+wrong_pic/
+src/assets/*.gif
+src/assets/.*.orig.png
+e2e/_*.mjs

@@ -1,7 +1,7 @@
 import type { LevelConfig } from '../levels/levelTypes';
 import type { Particle } from './particlePool';
 import type { BlockConfig } from '../blocks/blockConfig';
-import { rotAngle, type BlockInstance } from '../blocks/blockInstance';
+import { worldAngle, type BlockInstance } from '../blocks/blockInstance';
 
 const BANK_RESTITUTION = 0.5;
 const BLOCK_RESTITUTION = 0.3;
@@ -48,7 +48,7 @@ export function resolveBlockCollision(
 ): void {
   if (block.state !== 'placed') return;
 
-  const a = rotAngle(block.rotStep);
+  const a = worldAngle(block.rotStep);
   const c = Math.cos(a);
   const s = Math.sin(a);
   const dx = p.x - block.pos.x;

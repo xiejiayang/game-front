@@ -1,5 +1,6 @@
 import type { Vec2 } from '../core/vec2';
 import type { BlockConfig } from './blockConfig';
+import { THETA0, worldAngleForScreenAngle } from '../core/isoBasis';
 
 export type BlockState = 'preview' | 'placed' | 'broken';
 export type DamageState = 'stable' | 'collapsing' | 'collapsed';
@@ -24,13 +25,30 @@ export interface BlockInstance {
   hits: number; // 本帧进入包围盒的粒子数（每帧清零），>0 视为被接触
 }
 
-export function rotAngle(rotStep: number): number {
-  return (((rotStep % ROT_STEPS) + ROT_STEPS) % ROT_STEPS) * ROT_UNIT;
+function normStep(rotStep: number): number {
+  return ((rotStep % ROT_STEPS) + ROT_STEPS) % ROT_STEPS;
 }
 
-/** 长轴(ux)/短轴(uy)单位向量。 */
+/**
+ * **标称旋转角**（弧度）= rotStep × 45°，表示石墙在屏幕上「相对河道（下河岸）的偏角」。
+ * 仅用于挡水/导流分类（flowAlignment）：0°顺河、90°屏幕上横断河道。不是构件的世界朝向。
+ */
+export function rotAngle(rotStep: number): number {
+  return normStep(rotStep) * ROT_UNIT;
+}
+
+/**
+ * **世界朝向角**（弧度）：把「屏幕上想要的均匀朝向 θ0 + rotStep×45°」反投影成世界角。
+ * 构件 OBB / 碰撞 / 渲染都用它 → 屏幕上每档均匀转 45°（以河道为基准），且挡水位置与画面一致。
+ * rot0 → 世界 0°（顺河，与河道平行）；其余档因等距斜切而非 45° 的世界整数倍（有意如此）。
+ */
+export function worldAngle(rotStep: number): number {
+  return worldAngleForScreenAngle(THETA0 + normStep(rotStep) * ROT_UNIT);
+}
+
+/** 长轴(ux)/短轴(uy)单位向量（世界系，用于 OBB/碰撞/放置）。 */
 export function localAxes(rotStep: number): { ux: Vec2; uy: Vec2 } {
-  const a = rotAngle(rotStep);
+  const a = worldAngle(rotStep);
   const c = Math.cos(a);
   const s = Math.sin(a);
   return { ux: { x: c, y: s }, uy: { x: -s, y: c } };

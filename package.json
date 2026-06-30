@@ -12,7 +12,9 @@
     "e2e": "playwright test -c e2e/playwright.config.ts",
     "e2e:headed": "playwright test -c e2e/playwright.config.ts --headed",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "assets:cut-village": "node scripts/cut-village-paper.mjs",
+    "assets:cut-walls": "node scripts/cut-paper.mjs --walls"
   },
   "dependencies": {
     "pixi.js": "^8.6.6"

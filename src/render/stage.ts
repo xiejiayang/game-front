@@ -5,13 +5,15 @@ export interface Stage {
   app: Application;
   /** 逻辑坐标根容器，按窗口比例整体缩放。 */
   root: Container;
-  /** 背景层（宣纸 / 地形占位）。 */
+  /** 背景层（远景底图 / 宣纸；屏幕对齐，不参与等距投影）。 */
   bgLayer: Container;
-  /** 水流层（粒子 / 水面）。 */
+  /** 地面层（套等距矩阵；河道 / 水 / 构件 / 村庄都在其内，统一斜视角投影）。 */
+  groundLayer: Container;
+  /** 水流层（粒子 / 水面）；groundLayer 的子层。 */
   waterLayer: Container;
-  /** 构件层。 */
+  /** 构件层；groundLayer 的子层。 */
   blockLayer: Container;
-  /** UI / HUD 层。 */
+  /** UI / HUD 层（屏幕对齐）。 */
   uiLayer: Container;
   readonly width: number;
   readonly height: number;
@@ -32,10 +34,12 @@ export async function createStage(width: number, height: number): Promise<Stage>
   app.stage.addChild(root);
 
   const bgLayer = new Container();
+  const groundLayer = new Container();
   const waterLayer = new Container();
   const blockLayer = new Container();
   const uiLayer = new Container();
-  root.addChild(bgLayer, waterLayer, blockLayer, uiLayer);
+  groundLayer.addChild(waterLayer, blockLayer);
+  root.addChild(bgLayer, groundLayer, uiLayer);
 
   // 占位背景：宣纸底 + 河道色块（Slice 1 起用真实关卡数据替换）
   const paper = new Graphics();
@@ -46,6 +50,7 @@ export async function createStage(width: number, height: number): Promise<Stage>
     app,
     root,
     bgLayer,
+    groundLayer,
     waterLayer,
     blockLayer,
     uiLayer,

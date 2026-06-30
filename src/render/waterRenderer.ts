@@ -1,37 +1,31 @@
-import { Container, DisplacementFilter, Graphics, Sprite, TilingSprite } from 'pixi.js';
+import { Graphics, Sprite, TilingSprite } from 'pixi.js';
 import type { LevelConfig } from '../levels/levelTypes';
 import type { SimState } from '../sim/simulation';
 import type { Stage } from './stage';
 import { makeWorldView, type WorldView } from './worldView';
 import type { GameTextures } from './assets';
 
+// 卡通蓝水配色（参考 water-exam.gif）：深蓝水边 + 亮蓝水面 + 白色波纹高光。
+const WATER_EDGE = 0x3f86d6; // 水体外缘/阴影（偏深的蓝）
+const WATER_BODY = 0x9fd0f5; // 亮蓝水面
+const WATER_RIPPLE = 0xeaf6ff; // 白色流向波纹
+
 /**
- * 水流渲染：水墨场景底图 + 分层丝滑流水（参考真实长曝光溪流）+ 村落小屋。
- * 河道水面由三层叠加构成，并施加位移扰动制造水面湍流：
- *   ① 底层 water-flow（丝滑流水，青绿灰，染色与水墨场景调和）；
- *   ② 白沫两层 foam（additive 抠黑，前后两层不同速度/缩放 → 浪花层次）；
- *   ③ DisplacementFilter（flow-noise 灰度湍流，缓慢漂移 → 水面起伏churn）。
- * 放水(simulating)时整体提速、白沫增浓、扰动加强；水粒子渲染为 additive 白沫，
- * 在墙体处自然堆叠成亮白浪花 → 真实呈现「遇墙激起浪花 / 导流分水」。
- * 贴图由 Agnes.ai 生成（见 render/assets.ts）。纸底贴图（村落/印章）用 multiply 消隐纸白。
+ * 水流渲染（等距 2.5D）：远景底图(bgLayer，屏幕对齐) + 河道水墨水纹平面 + 村落小屋 + 洪水。
+ * 河道/岸/村屋/洪水都挂在 stage.waterLayer(groundLayer 内)，由地面等距矩阵统一斜切投影 →
+ * 河道呈「左高右低」平行四边形。河道底用水墨水纹贴图(water-tile)横向滚动模拟水流。
+ * 洪水表现见 update()（卡通蓝水绕石，片 B）。贴图由 Agnes.ai 生成（见 render/assets.ts）。
  */
 export class WaterRenderer {
   readonly view: WorldView;
-  private readonly foamGfx = new Graphics(); // 粒子白沫（additive）
-  private readonly splashGfx = new Graphics(); // 入水口喷涌白沫（additive）
+  private readonly particleGfx = new Graphics();
+  private readonly splashGfx = new Graphics();
   private readonly radius: number;
-
-  private base!: TilingSprite; // 底层流水
-  private foamBack!: TilingSprite; // 后景白沫
-  private foamFront!: TilingSprite; // 前景白沫
-  private disp!: Sprite; // 位移图精灵
-  private dispFilter!: DisplacementFilter;
-
+  private waterFlow!: TilingSprite;
   private readonly srcX: number;
   private readonly srcY0: number;
   private readonly srcY1: number;
   private phase = 0;
-  private flowMix = 0; // 0=编辑(平缓) → 1=放水(湍急)，平滑过渡
 
   constructor(stage: Stage, level: LevelConfig, tex: GameTextures) {
     this.view = makeWorldView(level, stage.width, stage.height);
@@ -40,57 +34,30 @@ export class WaterRenderer {
     this.srcY0 = this.view.sy(level.source.yMin);
     this.srcY1 = this.view.sy(level.source.yMax);
     this.drawStatic(stage, level, tex);
-    this.foamGfx.blendMode = 'add';
-    this.splashGfx.blendMode = 'add';
-    stage.waterLayer.addChild(this.foamGfx, this.splashGfx);
+    stage.waterLayer.addChild(this.particleGfx, this.splashGfx);
   }
 
   private drawStatic(stage: Stage, level: LevelConfig, tex: GameTextures): void {
     const v = this.view;
     const ch = level.channel;
 
-    // 1. 全屏水墨场景底图
+    // 1. 全屏远景水墨底图（bgLayer，屏幕对齐，不参与等距投影）
     const bg = new Sprite(tex.bgScene);
     bg.width = stage.width;
     bg.height = stage.height;
+    bg.alpha = 0.6; // 背景淡化 50%（向纸底退晕），突出前景河道/构件
     stage.bgLayer.addChild(bg);
 
-    // 2. 河道丝滑流水（分层 + 位移扰动），整体裁在河道矩形内
+    // 2. 河道水墨水纹平面（water-tile，横向滚动；地面像素坐标 → 地面矩阵斜切成平行四边形）
     const chW = (ch.x1 - ch.x0) * v.scale;
     const chH = (ch.y1 - ch.y0) * v.scale;
-    const flow = new Container();
-    flow.position.set(v.sx(ch.x0), v.sy(ch.y0));
-
-    // ② 底层流水：单块横向铺满整条河道（避免横向接缝），竖向裁切填满高度；染青绿与水墨调和
-    this.base = new TilingSprite({ texture: tex.waterFlow, width: chW, height: chH });
-    const spanScale = chW / tex.waterFlow.width; // 一块铺满宽度 → 横向接缝罕见
-    this.base.tileScale.set(spanScale);
-    this.base.tint = 0x9fb7b0; // 淡青绿，压住照片感融入水墨场景
-    this.base.alpha = 0.85;
-
-    // ③ 白沫两层（additive 抠黑）：同样单块铺满宽度，靠不同速度/相位错位制造层次
-    this.foamBack = new TilingSprite({ texture: tex.foam, width: chW, height: chH });
-    this.foamBack.tileScale.set(spanScale);
-    this.foamBack.blendMode = 'add';
-    this.foamBack.alpha = 0.16;
-
-    this.foamFront = new TilingSprite({ texture: tex.foam, width: chW, height: chH });
-    this.foamFront.tileScale.set(spanScale);
-    this.foamFront.tilePosition.set(tex.foam.width * 0.5, 30); // 错开半幅 + 竖向偏移，避免与后景重影
-    this.foamFront.blendMode = 'add';
-    this.foamFront.alpha = 0.1;
-
-    flow.addChild(this.base, this.foamBack, this.foamFront);
-
-    // 位移扰动：flow-noise 灰度图驱动 DisplacementFilter，缓慢漂移制造水面起伏
-    this.disp = new Sprite(tex.flowNoise);
-    this.disp.scale.set(chW / tex.flowNoise.width, chH / tex.flowNoise.height);
-    this.disp.renderable = false; // 仅作位移源，不直接绘制
-    flow.addChild(this.disp);
-    this.dispFilter = new DisplacementFilter({ sprite: this.disp, scale: 8 });
-    flow.filters = [this.dispFilter];
-
-    stage.bgLayer.addChild(flow);
+    const water = new TilingSprite({ texture: tex.waterTile, width: chW, height: chH });
+    water.position.set(v.sx(ch.x0), v.sy(ch.y0));
+    water.tileScale.set(chW / tex.waterTile.width); // 单块铺满整条宽度，缝隙罕见
+    water.blendMode = 'multiply'; // 纸白底消隐、只留青绿墨纹水波，叠在背景斜河上 → 通透水墨水纹
+    water.alpha = 0.9;
+    this.waterFlow = water;
+    stage.waterLayer.addChild(water);
 
     // 3. 河岸（赭石土色，半透；下岸在缺口处断开 → 洪水从缺口灌向村庄）
     const banks = new Graphics();
@@ -103,96 +70,96 @@ export class WaterRenderer {
     banks
       .rect(v.sx(level.gap.x1), v.sy(ch.y1), (ch.x1 - level.gap.x1) * v.scale, bankH)
       .fill({ color: bankColor, alpha: 0.7 });
-    stage.bgLayer.addChild(banks);
+    stage.waterLayer.addChild(banks);
 
-    // 4. 村落小屋（缺口下方村庄区；multiply 消隐纸底融入场景）
+    // 4. 村落小屋（缺口下方村庄区）：直立广告牌渲染。
+    //    贴图本身已按等距三分俯视绘制（屋舍直立），故**不挂在 groundLayer**——否则会被地面
+    //    等距矩阵二次斜切、把屋舍压扁变形（即「单纯跟着河道旋转」的问题）。改挂屏幕对齐的
+    //    uiLayer，用 view.project() 把村庄区投影点算成屏幕坐标定位，保持直立。multiply 消隐纸白底。
     const va = level.village.area;
     const hut = new Sprite(tex.villageHut);
-    hut.anchor.set(0.5);
-    const hutW = 4.2 * v.scale;
+    hut.anchor.set(0.5, 0.55); // 锚点 → 屋舍主体落在河道下边界之下的村庄地，坐于下岸
+    // 贴图已裁到房屋主体，故按裁切后的宽高比绘制（不再强制正方形）。宽度调小以保持
+    // 房子原视觉尺寸：原图房屋约占全幅 0.67，裁切后几乎占满 → 宽度由 8 → 5.5。
+    const hutW = 5.5 * v.scale;
     hut.width = hutW;
-    hut.height = hutW; // 原图近方形
-    hut.position.set(v.sx((va.x0 + va.x1) / 2), v.sy(va.y1) - hutW * 0.42);
-    hut.blendMode = 'multiply';
-    stage.bgLayer.addChild(hut);
+    hut.height = (hutW * hut.texture.height) / hut.texture.width; // 按裁切框宽高比
+    // 缺口中心 + 河道下边界(channel.y1) → 村庄正坐在下岸缺口处
+    const vp = v.project((va.x0 + va.x1) / 2, ch.y1);
+    hut.position.set(vp.x, vp.y);
+    // 贴图纸底已抠成透明（见 assets.ts / 离线 flood-fill 抠图），故用普通叠加即可：
+    // 只显示房屋本身、不再有任何方框，也不会被 multiply 压暗。
+    hut.eventMode = 'none'; // 纯装饰，不拦截 HUD 交互
+    stage.uiLayer.addChildAt(hut, 0); // 置于 HUD 之下、地面之上
   }
 
   clear(): void {
-    this.foamGfx.clear();
+    this.particleGfx.clear();
     this.splashGfx.clear();
   }
 
   /**
-   * 渲染层动效（与确定性 sim 无关）：分层流水滚动 + 位移扰动 + 入水口喷涌。
-   * @param dtMs 帧间隔毫秒；@param flowing 是否放水中（提速增浪、喷涌仅放水时显示）。
+   * 渲染层动效（与确定性 sim 无关）：河水横向滚动 + 入水口喷涌。
+   * @param dtMs 帧间隔毫秒；@param flowing 是否放水中（喷涌仅放水时显示）。
    */
   animate(dtMs: number, flowing: boolean): void {
-    const dt = dtMs / 1000;
-    this.phase += dt;
-    // 编辑↔放水 平滑过渡（约 0.5s）
-    this.flowMix += (Number(flowing) - this.flowMix) * Math.min(1, dt * 2);
-    const m = this.flowMix;
-
-    // 流速：编辑时缓流，放水时湍急（水自左向右 → 纹理向右滚，tilePosition.x 递增）
-    const v0 = 18 + 60 * m; // px/s 底层
-    this.base.tilePosition.x += v0 * dt;
-    this.foamBack.tilePosition.x += v0 * 1.4 * dt;
-    this.foamFront.tilePosition.x += v0 * 2.1 * dt;
-    // 白沫竖向轻微摆动，增加翻涌感
-    this.foamBack.tilePosition.y = Math.sin(this.phase * 0.6) * 6;
-    this.foamFront.tilePosition.y = Math.sin(this.phase * 0.9 + 1) * 4;
-    // 白沫浓度随放水增强（峰值收敛，避免中段过曝纯白）
-    this.foamBack.alpha = 0.14 + 0.24 * m;
-    this.foamFront.alpha = 0.09 + 0.19 * m;
-
-    // 位移扰动：缓慢漂移制造churn，放水时扰动更强
-    this.disp.x += (10 + 20 * m) * dt;
-    this.disp.y = Math.sin(this.phase * 0.5) * 8;
-    this.dispFilter.scale.x = 6 + 14 * m;
-    this.dispFilter.scale.y = 4 + 8 * m;
+    this.phase += dtMs / 1000;
+    this.waterFlow.tilePosition.x -= dtMs * 0.04; // 水自左向右流 → 纹理向左滚
 
     const g = this.splashGfx;
     g.clear();
     if (!flowing) return;
-    // 入水口喷涌：沿水源竖向喷出几道 additive 白沫，强调灌入
+    // 入水口喷涌：沿水源竖向喷出几道半透明白沫流线
     const r = this.radius;
     const n = 7;
     for (let i = 0; i < n; i++) {
       const t = i / (n - 1);
       const y = this.srcY0 + (this.srcY1 - this.srcY0) * t;
       const pulse = 0.5 + 0.5 * Math.sin(this.phase * 7 + i * 1.7);
-      const len = r * (3 + 5 * pulse);
+      const len = r * (3 + 4 * pulse);
       const x0 = this.srcX - r;
       const wob = Math.sin(this.phase * 5 + i) * r * 0.6;
       g.moveTo(x0, y)
         .lineTo(x0 + len, y + wob)
-        .stroke({ width: r * 1.3, color: 0xffffff, alpha: 0.04 + 0.08 * pulse, cap: 'round' });
+        .stroke({ width: r * 1.1, color: WATER_RIPPLE, alpha: 0.1 + 0.2 * pulse, cap: 'round' });
     }
   }
 
+  /**
+   * 洪水渲染（卡通亮蓝水，参考 water-exam.gif）：粒子由 sim 物理驱动，遇石墙自然偏转，
+   * 渲染层把偏转后的粒子画成连续蓝水体。三遍叠加：
+   * ① 深蓝水边（宽圆，堆叠成水体外缘暗色）② 亮蓝水面（中圆）③ 白色流向波纹（速度对齐短线）。
+   * 圆/线绘于地面像素坐标，经 groundLayer 等距矩阵投影 → 平铺在斜面河床上。
+   */
   update(sim: SimState): void {
     const v = this.view;
-    const g = this.foamGfx;
+    const g = this.particleGfx;
     const r = this.radius;
     g.clear();
-    // 水粒子 → additive 白沫细流：单根极淡流线，单个几乎隐于水面纹理；
-    // 仅在水流被墙体逼挤、粒子密集对齐处叠加成亮白浪花 → 遇墙激浪 / 斜墙导流。
+
+    // ① 深蓝水边：大半径低透叠加 → 水体连成片，边缘偏深
+    for (const p of sim.pool.particles) {
+      if (!p.active) continue;
+      g.circle(v.sx(p.x), v.sy(p.y), r * 2.6).fill({ color: WATER_EDGE, alpha: 0.1 });
+    }
+    // ② 亮蓝水面：中半径，盖在水边上 → 明亮卡通水色
+    for (const p of sim.pool.particles) {
+      if (!p.active) continue;
+      g.circle(v.sx(p.x), v.sy(p.y), r * 1.6).fill({ color: WATER_BODY, alpha: 0.18 });
+    }
+    // ③ 白色波纹高光：仅较快粒子，沿速度方向短线 → 体现流向与绕石偏转
     for (const p of sim.pool.particles) {
       if (!p.active) continue;
       const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
-      if (speed < 0.12) continue; // 近静止不画，杜绝离散白点
-      const hx = v.sx(p.x);
-      const hy = v.sy(p.y);
+      if (speed < 0.25) continue;
       const ux = p.vx / speed;
       const uy = p.vy / speed;
-      const len = Math.min(r * 7, Math.max(r * 3, speed * v.scale * 0.09));
-      const tx = hx - ux * len;
-      const ty = hy - uy * len;
-      const bright = Math.min(1, speed * 0.8);
-      // 单根细长流线（极低透明，无亮芯）：单个几乎隐于水纹，仅密集对齐处叠加成浪花
-      g.moveTo(tx, ty)
+      const hx = v.sx(p.x);
+      const hy = v.sy(p.y);
+      const len = Math.min(r * 5, r * 1.5 + speed * v.scale * 0.05);
+      g.moveTo(hx - ux * len, hy - uy * len)
         .lineTo(hx, hy)
-        .stroke({ width: r * 1.3, color: 0xffffff, alpha: 0.025 + 0.04 * bright, cap: 'round' });
+        .stroke({ width: r * 0.7, color: WATER_RIPPLE, alpha: 0.22, cap: 'round' });
     }
   }
 }

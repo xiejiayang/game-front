@@ -32,6 +32,18 @@ const MANIFEST = {
       `distant misty mountains at the top, willow and reeds along the shore, ${STYLE}, ` +
       `wide cinematic composition, atmospheric mist, high visual density background art for a game`,
   },
+  // 等距俯视背景：配合 2.5D 斜视角，地势自左上(高)向右下(低)对角铺展。
+  // 关键：背景内绝对不要画任何河流/水面（唯一的河由前景游戏河道叠加），避免「两条河」冲突。
+  'bg-iso': {
+    size: '1280x720',
+    prompt:
+      `An elevated three-quarter bird's-eye isometric view of a dry valley floor with NO river and NO water anywhere, ` +
+      `the terrain laid out as a diagonal plain sloping from the upper-left (higher ground) down toward the lower-right (lower ground), ` +
+      `terraced paddy fields, grassy meadows and earthen ground, scattered willow trees and reeds, low field dykes, ` +
+      `a small cluster of grey-roof village houses at the lower-right, distant misty mountains along the top edge, ` +
+      `IMPORTANT: absolutely no river, no stream, no water, no blue water surface — keep a broad diagonal central band as plain open dry ground (a separate river channel will be overlaid there), ` +
+      `${STYLE}, atmospheric mist, elegant negative space, high-angle isometric game background`,
+  },
   // 河水纹理（可平铺）：水墨水波纹，横向流动感
   'water-tile': {
     size: '1024x1024',
@@ -50,12 +62,41 @@ const MANIFEST = {
       `view with no perspective and no side faces visible, ink-wash rendering, ${STYLE}, soft faint cast ` +
       `shadow directly beneath, isolated centered on a plain off-white paper background, single horizontal bar object`,
   },
-  // 村落小屋（俯视聚落），白底
+  // 立体卵石堰（替代平面 stone-wall）：高角度三分俯视、长轴水平，能看见石堰顶面 + 一点正面侧壁，
+  // 有体量感但低矮厚实，贴合河道俯瞰视角。生成 4 张(石纹各异)供 4 个朝向各用一张。白底便于抠图。
+  // ⚠️ 生成后须抠纸底透明：`npm run assets:cut-walls`（见 scripts/cut-paper.mjs）。
+  ...Object.fromEntries(
+    [1, 2, 3, 4].map((n) => [
+      `stone-wall-iso-${n}`,
+      {
+        size: '1024x512',
+        prompt:
+          `A high-angle three-quarter bird's-eye view of a single long LOW FLAT rampart of packed river ` +
+          `cobblestones forming a thick low dam wall, the bar lying straight horizontally and spanning the ` +
+          `full width of the frame, its length about FOUR times its height (a long shallow low bar, NOT tall), ` +
+          `only one or two courses of stones high, with a visible flat stony TOP surface and a short low front ` +
+          `stone face of small height, rounded grey weathered river cobbles fitted together with sepia and ` +
+          `faint celadon moss, soft diffuse light from straight above, soft faint cast shadow directly ` +
+          `beneath, loose wet-brush ink-wash shuimo rendering, ${STYLE}, isolated centered on a clean bright ` +
+          `off-white rice-paper background, the long cobble bar filling the frame width with only thin empty ` +
+          `margins, consistent framing, single low horizontal cobble dam bar`,
+      },
+    ]),
+  ),
+  // 村落小屋（俯视聚落），白底。
+  // ⚠️ 生成后纸底是不透明的米黄宣纸，会在游戏里房子周围压出方框。重生成本贴图后，
+  //    必须再跑一次纸底抠透明：`npm run assets:cut-village`（见 scripts/cut-village-paper.mjs）。
   'village-hut': {
     size: '1024x1024',
     prompt:
-      `A small cluster of traditional Chinese village houses with grey tiled roofs, top-down view, ` +
-      `a few trees, ink-wash rendering, ${STYLE}, isolated centered on plain off-white paper background, single small settlement`,
+      `A small tight cluster of about five or six traditional Chinese village houses, ` +
+      `each with a grey tiled gable roof and plain whitewashed walls, drawn with fine sparse ink outlines, ` +
+      `seen from an elevated three-quarter bird's-eye isometric angle (looking slightly down), ` +
+      `the little houses overlapping into one compact hamlet, one or two leafy dark green ink-dab trees beside them, ` +
+      `loose wet-brush shuimo rendering exactly like a Song-dynasty landscape vignette, ` +
+      `${STYLE}, absolutely no fields, no paddies, no river, no water, no distant mountains, no ground texture, ` +
+      `just the isolated hamlet floating centered on a clean bright off-white rice-paper background, ` +
+      `single small settlement, lots of empty paper around it`,
   },
   // 结算印章（朱红篆刻）白底
   'seal': {

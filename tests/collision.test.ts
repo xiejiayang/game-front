@@ -11,14 +11,16 @@ function particleAt(x: number, y: number, vx: number, vy: number): Particle {
 }
 
 describe('构件碰撞 — 法向水势', () => {
-  it('正撞（长轴横断河道）比斜掠累计更高水势', () => {
-    // 正撞：rotStep=2（长轴沿 y，宽面法向沿 x），水 +x 迎面撞
-    const headOn = createBlockInstance('h', 'wall', { x: 0, y: 0 }, 2);
+  it('正撞（宽面最迎水流）比斜掠累计更高水势', () => {
+    // 水流沿世界 +x。构件「世界朝向」由屏幕均匀角(θ0+rotStep×45°)反投影而来（等距斜切），
+    // 故宽面最迎 +x（世界角最接近 90°）的是 rotStep=1（世界≈94°）；rotStep=3（世界≈143°）更斜掠。
+    // 注：屏幕上「看着横断河道」的是 rotStep=2，但斜切使其世界角≈125°、并非最迎 +x —— 此为投影固有现象，
+    //     pressure 仅为碰撞物理度量、不参与倒塌/胜负（倒塌靠 hits+分类，分类仍按标称偏角 rot2=挡水墙）。
+    const headOn = createBlockInstance('h', 'wall', { x: 0, y: 0 }, 1);
     const pHead = particleAt(-0.2, 0, 5, 0);
     resolveBlockCollision(pHead, headOn, wall);
 
-    // 斜掠：rotStep=1（45°），同样水 +x
-    const oblique = createBlockInstance('o', 'wall', { x: 0, y: 0 }, 1);
+    const oblique = createBlockInstance('o', 'wall', { x: 0, y: 0 }, 3);
     const pObl = particleAt(-0.2, 0, 5, 0);
     resolveBlockCollision(pObl, oblique, wall);
 
