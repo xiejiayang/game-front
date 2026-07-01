@@ -86,6 +86,17 @@ export class GameSession {
     return 'success';
   }
 
+  /**
+   * 拖拽中实时跟手：直接置位，**不吸附网格、不做合法性校验**（仅编辑态）。
+   * 用于让构件连续跟随光标、消除跳格与"非法即卡住"的顿挫；落手时再由 moveBlock 吸附+校验提交。
+   */
+  dragBlockTo(instanceId: string, worldPos: Vec2): void {
+    if (this.state !== 'editing') return;
+    const inst = this.placedBlocks.find((b) => b.instanceId === instanceId);
+    if (!inst) return;
+    inst.pos = { x: worldPos.x, y: worldPos.y };
+  }
+
   /** 旋转 45°；旋转后若与他者重叠则回退（仅编辑态、可旋转构件）。 */
   rotateBlock(instanceId: string): boolean {
     if (this.state !== 'editing') return false;

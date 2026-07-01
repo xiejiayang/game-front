@@ -106,6 +106,10 @@ async function bootstrap(): Promise<void> {
   let moved = false;
   let downAt = { x: 0, y: 0 };
   let selectedId: string | null = null;
+  // 拖拽跟手用：抓取时构件与光标的世界偏移（避免抓取瞬间跳到光标中心）、起点（非法回弹用）、当前自由位
+  let dragGrabOffset = { x: 0, y: 0 };
+  let dragOrigin = { x: 0, y: 0 };
+  let dragFree = { x: 0, y: 0 };
 
   // 拆除按钮：删除当前选中的石墙并返还金钱
   deleteZone.on('pointertap', () => {
@@ -146,6 +150,9 @@ async function bootstrap(): Promise<void> {
       dragId = b.instanceId;
       moved = false;
       downAt = { x: e.global.x, y: e.global.y };
+      dragOrigin = { x: b.pos.x, y: b.pos.y };
+      dragGrabOffset = { x: b.pos.x - w.x, y: b.pos.y - w.y }; // 保持抓取点不跳
+      dragFree = { x: b.pos.x, y: b.pos.y };
     } else {
       selectedId = null; // 点空白处取消选中
     }
@@ -161,7 +168,9 @@ async function bootstrap(): Promise<void> {
     } else if (mode === 'dragging' && dragId) {
       if (Math.hypot(e.global.x - downAt.x, e.global.y - downAt.y) > 6) {
         moved = true;
-        session.moveBlock(dragId, snapToGrid(w)); // 合法才移动，否则保持
+        // 连续跟手：直接置位（不吸附、不校验）→ 丝滑跟随，无跳格、无"非法即卡住"顿挫
+        dragFree = { x: w.x + dragGrabOffset.x, y: w.y + dragGrabOffset.y };
+        session.dragBlockTo(dragId, dragFree);
       }
     }
   });
@@ -176,6 +185,10 @@ async function bootstrap(): Promise<void> {
       mode = 'none';
     } else if (mode === 'dragging' && dragId) {
       if (moved) {
+        // 落手提交：吸附网格 + 校验；非法则回弹到起点（保持"最终落点必为合格网格点"不变量）
+        if (session.moveBlock(dragId, dragFree) !== 'success') {
+          session.dragBlockTo(dragId, dragOrigin);
+        }
         selectedId = dragId; // 拖动后选中
       } else if (selectedId === dragId) {
         session.rotateBlock(dragId); // 再次点选中的墙 → 旋转 45°
