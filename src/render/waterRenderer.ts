@@ -3,11 +3,11 @@ import type { LevelConfig } from '../levels/levelTypes';
 import type { SimState } from '../sim/simulation';
 import type { Stage } from './stage';
 import { makeWorldView, type WorldView } from './worldView';
+import { FluidSurface } from './fluidSurface';
+import type { WallRect } from './blockRenderer';
 import type { GameTextures } from './assets';
 
-// 卡通蓝水配色（参考 water-exam.gif）：深蓝水边 + 亮蓝水面 + 白色波纹高光。
-const WATER_EDGE = 0x3f86d6; // 水体外缘/阴影（偏深的蓝）
-const WATER_BODY = 0x9fd0f5; // 亮蓝水面
+// 入水口喷涌白沫高光色（水面主体的深浅蓝已移入 fluidSurface 着色器）。
 const WATER_RIPPLE = 0xeaf6ff; // 白色流向波纹
 
 /**
@@ -18,8 +18,8 @@ const WATER_RIPPLE = 0xeaf6ff; // 白色流向波纹
  */
 export class WaterRenderer {
   readonly view: WorldView;
-  private readonly particleGfx = new Graphics();
   private readonly splashGfx = new Graphics();
+  private readonly fluid: FluidSurface;
   private readonly radius: number;
   private waterFlow!: TilingSprite;
   private readonly srcX: number;
@@ -34,7 +34,9 @@ export class WaterRenderer {
     this.srcY0 = this.view.sy(level.source.yMin);
     this.srcY1 = this.view.sy(level.source.yMax);
     this.drawStatic(stage, level, tex);
-    stage.waterLayer.addChild(this.particleGfx, this.splashGfx);
+    // 写实流体水面（metaball 融合，屏幕对齐层，置于河床之上/石墙之下）
+    this.fluid = new FluidSurface(stage, this.view, level.maxParticles, tex.waterFlow, level);
+    stage.waterLayer.addChild(this.splashGfx);
   }
 
   private drawStatic(stage: Stage, level: LevelConfig, tex: GameTextures): void {
@@ -94,17 +96,18 @@ export class WaterRenderer {
   }
 
   clear(): void {
-    this.particleGfx.clear();
     this.splashGfx.clear();
+    this.fluid.clear();
   }
 
   /**
-   * 渲染层动效（与确定性 sim 无关）：河水横向滚动 + 入水口喷涌。
+   * 渲染层动效（与确定性 sim 无关）：河水横向滚动 + 入水口喷涌 + 水面流纹推进。
    * @param dtMs 帧间隔毫秒；@param flowing 是否放水中（喷涌仅放水时显示）。
    */
   animate(dtMs: number, flowing: boolean): void {
     this.phase += dtMs / 1000;
     this.waterFlow.tilePosition.x -= dtMs * 0.04; // 水自左向右流 → 纹理向左滚
+    this.fluid.animate(dtMs); // 推进写实水面流纹
 
     const g = this.splashGfx;
     g.clear();
@@ -126,40 +129,11 @@ export class WaterRenderer {
   }
 
   /**
-   * 洪水渲染（卡通亮蓝水，参考 water-exam.gif）：粒子由 sim 物理驱动，遇石墙自然偏转，
-   * 渲染层把偏转后的粒子画成连续蓝水体。三遍叠加：
-   * ① 深蓝水边（宽圆，堆叠成水体外缘暗色）② 亮蓝水面（中圆）③ 白色流向波纹（速度对齐短线）。
-   * 圆/线绘于地面像素坐标，经 groundLayer 等距矩阵投影 → 平铺在斜面河床上。
+   * 洪水渲染：粒子由 sim 物理驱动（遇石墙自然偏转），此处交给 FluidSurface 把粒子
+   * 投影+密度场融合成**一整片写实蓝水**（深浅蓝 + 流纹 + 边缘白沫），而非一颗颗圆点/短线。
+   * 融合与着色见 render/fluidSurface.ts。
    */
-  update(sim: SimState): void {
-    const v = this.view;
-    const g = this.particleGfx;
-    const r = this.radius;
-    g.clear();
-
-    // ① 深蓝水边：大半径低透叠加 → 水体连成片，边缘偏深
-    for (const p of sim.pool.particles) {
-      if (!p.active) continue;
-      g.circle(v.sx(p.x), v.sy(p.y), r * 2.6).fill({ color: WATER_EDGE, alpha: 0.1 });
-    }
-    // ② 亮蓝水面：中半径，盖在水边上 → 明亮卡通水色
-    for (const p of sim.pool.particles) {
-      if (!p.active) continue;
-      g.circle(v.sx(p.x), v.sy(p.y), r * 1.6).fill({ color: WATER_BODY, alpha: 0.18 });
-    }
-    // ③ 白色波纹高光：仅较快粒子，沿速度方向短线 → 体现流向与绕石偏转
-    for (const p of sim.pool.particles) {
-      if (!p.active) continue;
-      const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
-      if (speed < 0.25) continue;
-      const ux = p.vx / speed;
-      const uy = p.vy / speed;
-      const hx = v.sx(p.x);
-      const hy = v.sy(p.y);
-      const len = Math.min(r * 5, r * 1.5 + speed * v.scale * 0.05);
-      g.moveTo(hx - ux * len, hy - uy * len)
-        .lineTo(hx, hy)
-        .stroke({ width: r * 0.7, color: WATER_RIPPLE, alpha: 0.22, cap: 'round' });
-    }
+  update(sim: SimState, wallRects: WallRect[] = []): void {
+    this.fluid.update(sim.pool.particles, this.view, wallRects);
   }
 }

@@ -13,3 +13,4 @@ wrong_pic/
 src/assets/*.gif
 src/assets/.*.orig.png
 e2e/_*.mjs
+my-session.md

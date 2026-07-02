@@ -22,6 +22,7 @@ export interface BlockInstance {
   damage: DamageState;
   contactTime: number; // 累计被洪水接触的时间（秒）
   pressure: number; // 本帧累计水势（每帧清零），损坏渲染等用
+  pressureSmoothed: number; // pressure 的指数滑动平均，用于迎水面加深，避免闪烁
   hits: number; // 本帧进入包围盒的粒子数（每帧清零），>0 视为被接触
 }
 
@@ -70,6 +71,7 @@ export function createBlockInstance(
     damage: 'stable',
     contactTime: 0,
     pressure: 0,
+    pressureSmoothed: 0,
     hits: 0,
   };
 }
@@ -79,7 +81,7 @@ export function createBlockInstance(
 const HEAD_ALIGN = 0.85;
 // 接触后倒塌时间（秒）：挡水墙快垮，导流墙 8~10s 内垮（含 45°/0° 等一切非横断墙）。
 const HEAD_COLLAPSE_S = 3.5;
-const DIVERSION_COLLAPSE_S = 9;
+const DIVERSION_COLLAPSE_S = 14;
 
 /**
  * 构件宽面相对主流向(+x)的对齐度 |sin(angle)|。
@@ -111,7 +113,10 @@ export function updateBlockDamage(block: BlockInstance, _cfg: BlockConfig, dt: n
 
   // 首次被接触即闩锁，之后连续计时（水一旦冲到墙，结构便持续受损，不要求持续接触）
   if (block.hits > 0 || block.contactTime > 0) {
-    block.contactTime += dt;
+    // 贴墙导流后，挡水墙（横断）会承受更大法向水压 → 用 pressure 加速倒塌；
+    // 导流墙/斜放墙 pressure 小，倒塌速度接近原 8-10s。
+    const rate = 1 + Math.max(0, block.pressure) * 0.35;
+    block.contactTime += dt * rate;
     block.damage = 'collapsing';
   }
   if (block.contactTime >= collapseDelay(block.rotStep)) {

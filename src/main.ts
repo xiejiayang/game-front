@@ -241,8 +241,9 @@ async function bootstrap(): Promise<void> {
     if (session.state === 'simulating') {
       loop.advance(ticker.deltaMS / 1000, () => session.tick());
     }
-    if (session.state === 'simulating' && session.sim) water.update(session.sim);
+    // 先同步石墙(得到本帧屏幕矩形)，再让水面按这些矩形精确抠缝 → 抠缝与石墙完全重合。
     blocks.sync(session.placedBlocks, session.state === 'editing' ? selectedId : null);
+    if (session.state === 'simulating' && session.sim) water.update(session.sim, blocks.footprints());
     hud.update(session);
 
     // 渲染层动效（与确定性 sim 解耦）

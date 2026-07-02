@@ -51,3 +51,20 @@ export function worldAngleForScreenAngle(screenAngle: number): number {
   const wy = (-B * cs + A * sn) / _det;
   return Math.atan2(wy, wx);
 }
+
+/**
+ * 抛物线射流的"重力/加速度"方向（单位世界向量）：
+ * 以下游(+x)为主、略带屏幕正下方下坠分量（你指定方向）。
+ * 由 70% 下游 + 30% 屏幕正下方 混合、单位化，使视觉上水被甩出后微微下坠，
+ * 但不会持续把主流推向下岸/村庄（对比纯屏幕正下方 (−0.35,+0.94)）。
+ */
+function _parabolaGravity(): { x: number; y: number } {
+  const screenDownX = -C / _det;
+  const screenDownY = A / _det;
+  const wx = 0.7 * 1.0 + 0.3 * screenDownX; // 70% +x
+  const wy = 0.7 * 0.0 + 0.3 * screenDownY; // 30% 屏幕正下方
+  const len = Math.hypot(wx, wy) || 1;
+  return { x: wx / len, y: wy / len };
+}
+export const PARABOLA_GRAVITY = _parabolaGravity();
+

@@ -7,7 +7,7 @@ import type { Particle } from '../src/sim/particlePool';
 const wall = getBlockConfig('wall');
 
 function particleAt(x: number, y: number, vx: number, vy: number): Particle {
-  return { x, y, vx, vy, life: 1, ink: 0, active: true };
+  return { x, y, vx, vy, life: 1, ink: 0, active: true, jet: 0 };
 }
 
 describe('构件碰撞 — 法向水势', () => {

@@ -6,8 +6,10 @@ import { resolveBankCollision, resolveBlockCollision } from './collision';
 import { inVillage } from './village';
 import { getBlockConfig } from '../blocks/blockConfig';
 import { updateBlockDamage, type BlockInstance } from '../blocks/blockInstance';
+import { PARABOLA_GRAVITY } from '../core/isoBasis';
 
 const LIFE_SECONDS = 8; // 粒子最长存活，避免无限堆积
+const JET_GRAVITY = 4.5; // 抛物线射流重力加速度（米/秒²）
 
 /** 模拟运行时状态（纯逻辑，无渲染依赖）。 */
 export interface SimState {
@@ -59,16 +61,23 @@ export function stepSim(sim: SimState, dt: number): void {
     if (!p.active) continue;
 
     // 河床坡降 + 湍流（确定性 rng）
-    p.vy += src.flowBiasY * dt + (rng.next() * 2 - 1) * src.turbulence * src.speed * dt;
-    if (p.vy > maxV) p.vy = maxV;
-    else if (p.vy < -maxV) p.vy = -maxV;
+    if (p.jet <= 0) {
+      p.vy += src.flowBiasY * dt + (rng.next() * 2 - 1) * src.turbulence * src.speed * dt;
+      if (p.vy > maxV) p.vy = maxV;
+      else if (p.vy < -maxV) p.vy = -maxV;
+    } else {
+      // 射流粒子：只受抛物线重力（以下游为主、略带下坠），不受河床坡降/湍流干扰，保证轨迹清晰。
+      p.vx += PARABOLA_GRAVITY.x * JET_GRAVITY * dt;
+      p.vy += PARABOLA_GRAVITY.y * JET_GRAVITY * dt;
+      p.jet -= dt;
+    }
 
     p.x += p.vx * dt;
     p.y += p.vy * dt;
 
     // 构件碰撞（顺序固定）
     for (const b of sim.blocks) {
-      resolveBlockCollision(p, b, getBlockConfig(b.blockId));
+      resolveBlockCollision(p, b, getBlockConfig(b.blockId), src.dir, sim.level.channel.y0, sim.level.channel.y1, src.speed);
     }
 
     const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
@@ -88,9 +97,12 @@ export function stepSim(sim: SimState, dt: number): void {
     }
   }
 
-  // 4. 构件倒塌推进
+  // 4. 构件倒塌推进 + 水压平滑（平滑用于迎水面加深，避免闪烁）
   for (const b of sim.blocks) {
     updateBlockDamage(b, getBlockConfig(b.blockId), dt);
+    // EMA：瞬时 pressure 每帧清零，这里把它平滑成连续变化的加深强度。
+    const alpha = 0.15; // 越接近 1 越跟手；越小越平滑
+    b.pressureSmoothed = b.pressureSmoothed * (1 - alpha) + b.pressure * alpha;
   }
 
   // 5. 时间推进与结束判定

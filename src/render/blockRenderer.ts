@@ -16,6 +16,24 @@ interface BlockNode {
   sprite: Sprite;
   outline: Graphics;
   wasBroken: boolean;
+  rect: WallRect | null; // 本帧所绘 billboard 的屏幕矩形（仅 placed；broken/其他为 null）
+}
+
+/** 一道石墙在屏幕上的实际矩形（与所绘 billboard 完全一致），供水面抠缝精确重合。
+ *  另附世界数据，供水面按"分离射流抛物线"计算干尾流。 */
+export interface WallRect {
+  cx: number; // 矩形中心（屏幕像素，已含 anchor 偏移）
+  cy: number;
+  angle: number; // 屏幕旋转角（弧度）
+  hw: number; // 半宽（沿长轴）
+  hh: number; // 半高（沿短轴）
+  // —— 世界数据（用于尾流判定：端头贴岸/自由、平行、射流几何）——
+  wx: number; // 世界中心 x
+  wy: number; // 世界中心 y
+  rotStep: number;
+  hlw: number; // 世界半长轴（米）
+  hsw: number; // 世界半短轴（米）
+  pressure: number; // 本帧法向水压（迎水面加深用）
 }
 
 interface Debris {
@@ -80,7 +98,7 @@ export class BlockRenderer {
     sprite.anchor.set(0.5, 0.58); // 锚点略偏下 → 墙基坐在投影点、墙体向上立起
     root.addChild(outline, sprite);
     this.layer.addChildAt(root, 0); // 在碎屑层之下
-    return { root, sprite, outline, wasBroken: false };
+    return { root, sprite, outline, wasBroken: false, rect: null };
   }
 
   /** 某旋转档位下，石墙长轴的投影屏幕角（弧度）。 */
@@ -151,8 +169,10 @@ export class BlockRenderer {
     }
     node.wasBroken = broken;
     if (broken) {
+      // 垮塌 → 压扁成低矮碎石堆：高度大幅压低、暗化、略透，配合迸溅碎屑，明显呈废墟/缺口，不再像整墙。
+      sprite.height = h * 0.32;
       sprite.tint = TINT_BROKEN;
-      sprite.alpha = 0.5;
+      sprite.alpha = 0.75;
     } else if (b.damage === 'collapsing') {
       sprite.tint = TINT_COLLAPSING;
       sprite.alpha = 1;
@@ -170,5 +190,35 @@ export class BlockRenderer {
 
     node.root.position.set(p.x, p.y);
     node.root.rotation = angle;
+
+    // 记录本帧所绘 billboard 的屏幕矩形，供水面抠缝精确重合。只对 placed 墙抠缝（broken 放行）。
+    // 中心含 anchor(0.5,0.58) 的竖直偏移 → 与 sprite 实际位置一致；hw/hh 用 sprite 实际宽高。
+    if (b.state === 'placed') {
+      const offY = (0.5 - 0.58) * h; // sprite 几何中心相对 root 原点的局部竖直偏移
+      node.rect = {
+        cx: p.x - offY * Math.sin(angle),
+        cy: p.y + offY * Math.cos(angle),
+        angle,
+        hw: w / 2,
+        hh: h / 2,
+        wx: b.pos.x,
+        wy: b.pos.y,
+        rotStep: b.rotStep,
+        hlw: cfg.longLen / 2,
+        hsw: cfg.shortLen / 2,
+        pressure: b.pressureSmoothed,
+      };
+    } else {
+      node.rect = null;
+    }
+  }
+
+  /** 各已放置(placed)石墙在屏幕上的实际矩形（与所绘 billboard 完全一致），供水面抠缝。 */
+  footprints(): WallRect[] {
+    const out: WallRect[] = [];
+    for (const node of this.nodes.values()) {
+      if (node.rect) out.push(node.rect);
+    }
+    return out;
   }
 }

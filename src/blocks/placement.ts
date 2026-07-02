@@ -3,7 +3,7 @@ import type { LevelConfig, Rect } from '../levels/levelTypes';
 import type { BlockConfig } from './blockConfig';
 import { localAxes, type BlockInstance } from './blockInstance';
 
-export const GRID_STEP = 0.5;
+export const GRID_STEP = 0.3;
 
 export type PlacementResult =
   | 'success'
@@ -77,10 +77,11 @@ function projectRange(corners: Vec2[], ax: number, ay: number): { min: number; m
  */
 function obbOverlap(aCorners: Vec2[], aAxes: { ux: Vec2; uy: Vec2 }, bCorners: Vec2[], bAxes: { ux: Vec2; uy: Vec2 }): boolean {
   const axes = [aAxes.ux, aAxes.uy, bAxes.ux, bAxes.uy];
+  const ALLOWED_OVERLAP = 0.3; // 允许的最大重叠深度（米）
   for (const ax of axes) {
     const ra = projectRange(aCorners, ax.x, ax.y);
     const rb = projectRange(bCorners, ax.x, ax.y);
-    if (ra.max <= rb.min || rb.max <= ra.min) return false; // 该轴有间隙 → 分离
+    if (ra.max <= rb.min + ALLOWED_OVERLAP || rb.max <= ra.min + ALLOWED_OVERLAP) return false; // 该轴有间隙 → 分离
   }
   return true;
 }
